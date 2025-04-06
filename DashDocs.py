@@ -6,6 +6,7 @@ import subprocess
 import pandas as pd
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from tkinter import simpledialog, messagebox
 from tkinter import filedialog, messagebox, Listbox, MULTIPLE, END, Scrollbar, RIGHT, Y, LEFT, BOTH
 import openpyxl
 from openpyxl import load_workbook
@@ -25,11 +26,12 @@ class ExcelProcessorApp:
         self.program_var = tk.StringVar(value="Program1")
 
         # Radio buttons to choose the program
-        tk.Label(root, text="Choose a Program: Version 1").pack(pady=5)
+        tk.Label(root, text="Choose a Program: PY V-2.0.0 APR|06|04|2025").pack(pady=5)
         tk.Radiobutton(root, text="Program 1-AOI", variable=self.program_var, value="Program1").pack(anchor=tk.W)
         tk.Radiobutton(root, text="Program 2-SPI", variable=self.program_var, value="Program2").pack(anchor=tk.W)
         tk.Radiobutton(root, text="Program 3-RO-single", variable=self.program_var, value="Program3").pack(anchor=tk.W)
         tk.Radiobutton(root, text="Program 4-RO-Multi", variable=self.program_var, value="Program4").pack(anchor=tk.W)
+        tk.Label(root, text="MIT License\n\nCopyright (C) <2025>  <BALA GANESH>").pack(pady=5)
 
         # Button to run the selected program
         self.run_button = tk.Button(root, text="Run Program", command=self.run_selected_program)
@@ -330,35 +332,82 @@ class CSVtoExcelApp:
         if len(selected_ids) > 100:  # Assuming you want a maximum of 100 ComponentIDs
             messagebox.showwarning("Invalid Selection", "Please select up to 100 ComponentIDs")
             return
+        
+        # Step 1: Ask for Stencil Mil
+        root = tk.Tk()
+        root.withdraw()
+
+        stencil_mil = simpledialog.askfloat("Stencil Mil Input", "Enter Stencil Mil value:")
+        if stencil_mil is None:
+            messagebox.showinfo("Process Cancelled", "No input given. Operation aborted.")
+            return  # or exit from your function
+
+        # Step 2: Default Spec Limits
+        upper_limit = stencil_mil + 2
+        lower_limit = stencil_mil - 1
+
+        # Step 3: Ask user if they want to tighten the spec
+        tighten = messagebox.askyesno("Tighten Spec?", 
+            f"Default Spec Limits:\nUpper: {upper_limit}\nLower: {lower_limit}\n\nWould you like to adjust them?")
+
+        # Step 4: If yes, allow user to edit them
+        if tighten:
+            user_upper = simpledialog.askfloat("Edit Upper Limit", f"Enter custom Upper Limit (Default: {upper_limit}):")
+            user_lower = simpledialog.askfloat("Edit Lower Limit", f"Enter custom Lower Limit (Default: {lower_limit}):")
+
+            if user_upper is not None:
+                upper_limit = user_upper
+            if user_lower is not None:
+                lower_limit = user_lower
+
+        # Step 5: Final confirmation
+        messagebox.showinfo("Final Spec Limits", 
+            f"Stencil Mil: {stencil_mil}\nUpper Limit: {upper_limit}\nLower Limit: {lower_limit}")
+
+        # --- Continue with your sampling code ---
 
         sampled_data = []
         self.original_results = pd.DataFrame()
+
         for comp_id in selected_ids:
             comp_data = self.combined_df[self.combined_df['ComponentID'] == comp_id].copy()
-            if len(comp_data) > 100:   # change sample data from 20 to 100
-                comp_data = comp_data.sample(100)  # change sample data from 20 to 100
+            if len(comp_data) > 100:
+                comp_data = comp_data.sample(100)
+
+            # Filter within spec
+            comp_data = comp_data[(comp_data['Mils'] >= lower_limit) & (comp_data['Mils'] <= upper_limit)]
+
             sampled_data.append(comp_data[['ComponentID', 'Mils']])
-            self.original_results = pd.concat([self.original_results, comp_data[['ComponentID', 'Mils', 'RESULT']]], ignore_index=True)
+            self.original_results = pd.concat([self.original_results, comp_data[['ComponentID', 'Mils', 'RESULT', 'VOLUME', 'HEIGHT', 'AREA', 'Panel']]], ignore_index=True)
 
         sampled_data_df = pd.concat(sampled_data, ignore_index=True)
+
+        # Save out-of-spec data to another sheet
+        out_of_spec_df = self.combined_df[(self.combined_df['ComponentID'].isin(selected_ids)) &
+                                        ((self.combined_df['Mils'] < lower_limit) | (self.combined_df['Mils'] > upper_limit))]
+
+        if not out_of_spec_df.empty:
+            out_of_spec_path = os.path.join(os.path.dirname(self.file_path), "Out_of_Spec_Data.xlsx")
+            out_of_spec_df.to_excel(out_of_spec_path, index=False)
 
         # Transpose the data
         transposed_data = {'ComponentID': selected_ids}
         max_samples = max(len(sampled_data_df[sampled_data_df['ComponentID'] == comp_id]) for comp_id in selected_ids)
-        
+
         for i in range(max_samples):
             transposed_data[f'Sample_{i + 1}'] = [sampled_data_df[sampled_data_df['ComponentID'] == comp_id]['Mils'].iloc[i] if i < len(sampled_data_df[sampled_data_df['ComponentID'] == comp_id]) else None for comp_id in selected_ids]
-        
+
         self.transposed_data_df = pd.DataFrame(transposed_data)
-        
+
         self.listbox_window.destroy()
         messagebox.showinfo("Selected", f"Selected ComponentIDs: {', '.join(selected_ids)}")
 
         # Copy the target file to the working directory
-        target_file_path = r"D:\NX_BACKWORK\Database_File\SMT_Data Analyzer\CPK-SPC-Xbar,R-chart.xlsx"
+        target_file_path = r"D:\\NX_BACKWORK\\Database_File\\SMT_Data Analyzer\\CPK-SPC-Xbar,R-chart.xlsx"
         working_directory = os.path.dirname(self.file_path)
         copied_file_path = os.path.join(working_directory, "CPK-SPC-Xbar,R-chart.xlsx")
         shutil.copy(target_file_path, copied_file_path)
+
 
 #====================================================================================================================
 
